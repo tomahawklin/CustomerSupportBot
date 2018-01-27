@@ -35,17 +35,18 @@ class vector_model(object):
     """
     Object holding item to index map and item vectors
     """
-    def __init__(self, item_map, vectors, vectorizer = None):
+    def __init__(self, item_map, vectors):
         self.item_map = item_map
-        self.vectors = vectors
+        self.vectors = vectors / np.linalg.norm(vectors, axis = 1, ord = 2)[:,None]
         self.num_items = vectors.shape[0]
         self.dim = vectors.shape[1]
         self.inv_map = {v: k for k, v in self.item_map.items()}
-        self.vectorizer = vectorizer
-    def get_nearest(self, candidate_vector, topk = 1, ex_self = True):
+    def get_nearest(self, candidate_vector, threshold = 7, topk = 1, ex_self = True):
         if candidate_vector.shape != (1, self.dim):
             candidate_vector = candidate_vector.reshape(1, self.dim)
         score = self.vectors.dot(candidate_vector.T)
+        if max(score) < threshold:
+            return ["Sorry can't find close match. An agent will come to help you :)"]
         if score.shape != (self.num_items):
             score = score.reshape(self.num_items)
         top_index = score.argsort()[::-1][:topk].tolist()
@@ -148,18 +149,19 @@ item_map = dict()
 for t in train:
     item_map[t] = len(item_map)
 
-cv_model = vector_model(item_map, vectors, cv)
+cv_model = vector_model(item_map, vectors)
 f = open('cv_model.pkl', 'wb')
 pkl.dump(cv_model, f)
 f.close()
 
+# tfidf model is not consistent in threshold experiment
 tv = TfidfVectorizer(ngram_range = (1, 2), stop_words = 'english', max_features = 30000)
 vectors = tv.fit_transform(train).toarray()
 item_map = dict()
 for t in train:
     item_map[t] = len(item_map)
 
-tv_model = vector_model(item_map, vectors, tv)
+tv_model = vector_model(item_map, vectors)
 f = open('tv_model.pkl', 'wb')
 pkl.dump(tv_model, f)
 f.close()
@@ -169,19 +171,38 @@ for d in data:
 	qa_map[d.tweets[0].text] = d.tweets[1].text
 
 def test_model(model, vectorizer, outfile, test = test, topk = 3, qa_map = qa_map):
-	filename = outfile if '.txt' in outfile else outfile + '.txt'
-	f = open(filename, 'w')
-	for idx in range(len(test)):
-		test_q = test[idx]
-		match = model.get_nearest(vectorizer.transform([test_q]).toarray(), topk = topk)
-		f.write('Test question: %d \n' % idx)
-		f.write(test_q + '\n')
-		f.write(qa_map[test_q] + '\n')
-		for i in range(len(match)):
-			f.write('Top %d \n' % (i + 1))
-			f.write(match[i] + '\n')
-			f.write(qa_map[match[i]] + '\n')
-	f.close()
+    filename = outfile if '.txt' in outfile else outfile + '.txt'
+    f = open(filename, 'w')
+    for idx in range(len(test)):
+        test_q = test[idx]
+        match = model.get_nearest(vectorizer.transform([test_q]).toarray(), topk = topk)
+        f.write('Test question: %d \n' % idx)
+        f.write('\n')
+        f.write(test_q + '\n')
+        f.write('\n')
+        f.write(qa_map[test_q] + '\n')
+        f.write('\n')
+        if len(match) < topk:
+            f.write(match[0] + '\n')
+            continue
+        for i in range(len(match)):
+            f.write('Top %d \n' % (i + 1))
+            f.write('\n')
+            f.write(match[i] + '\n')
+            f.write('\n')
+            f.write(qa_map[match[i]] + '\n')
+            f.write('\n')
+    f.close()
+
+def unit_test(model, vectorizer, test = test, topk = 3, qa_map = qa_map):
+    for idx in range(10):
+        test_q = test[idx]
+        match = model.get_nearest(vectorizer.transform([test_q]).toarray(), topk = topk)
+
+def test_threshold(vectors, v):
+    score = vectors.dot(v.T).flatten()
+    score.sort()
+    return score[-3:]
 
 test_model(cv_model, cv, 'cv_test')
 test_model(tv_model, tv, 'tv_test')
