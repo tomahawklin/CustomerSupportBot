@@ -65,7 +65,7 @@ print([len(clusters[k]) for k in clusters])
 
 # Word2Vec feature cluster
 train_tmp = [t.split() for t in train]
-model = Word2Vec(train_tmp, window = 10, min_count = 2)
+model = Word2Vec(train_tmp, window = 100, min_count = 2)
 vectors = []
 for t in train_tmp:
 	mat = [model.wv[item] if item in model.wv else np.zeros(model.wv['As'].shape) for item in t]

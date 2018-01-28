@@ -7,6 +7,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import pickle as pkl
 import random
+from gensim.models import Word2Vec
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
+
+
 df = pd.read_csv('twcs.csv')
 df['created_at'] = df['created_at'].apply(lambda x:dt.datetime.strptime(x,'%a %b %d %H:%M:%S +0000 %Y'))
 
@@ -143,14 +147,16 @@ f = open('test.pkl', 'wb')
 pkl.dump(test, f)
 f.close()
 
-cv = CountVectorizer(ngram_range = (1, 2), stop_words = 'english', max_features = 30000)
+
+stop_words = list(ENGLISH_STOP_WORDS) + ['flight', 'hey', 'delta', 'airline', 'airlines', 'american', 'air', 'americanair', 'british_airways', 'hi', 'plane', 'https']
+cv = CountVectorizer(ngram_range = (1, 2), min_df = 2, max_features = 50000, stop_words = stop_words)
 vectors = cv.fit_transform(train).toarray()
 item_map = dict()
 for t in train:
     item_map[t] = len(item_map)
 
 cv_model = vector_model(item_map, vectors)
-f = open('cv_model.pkl', 'wb')
+f = open('cv_model_new.pkl', 'wb')
 pkl.dump(cv_model, f)
 f.close()
 
@@ -170,12 +176,12 @@ qa_map = dict()
 for d in data:
 	qa_map[d.tweets[0].text] = d.tweets[1].text
 
-def test_model(model, vectorizer, outfile, test = test, topk = 3, qa_map = qa_map):
+def test_model(model, vectorizer, outfile, test = test, topk = 2, qa_map = qa_map, threshold = 5):
     filename = outfile if '.txt' in outfile else outfile + '.txt'
     f = open(filename, 'w')
     for idx in range(len(test)):
         test_q = test[idx]
-        flag, match = model.get_nearest(vectorizer.transform([test_q]).toarray(), topk = topk)
+        flag, match = model.get_nearest(vectorizer.transform([test_q]).toarray(), topk = topk, threshold = threshold)
         f.write('Test question: %d \n' % idx)
         f.write('\n')
         f.write(test_q + '\n')
@@ -196,15 +202,67 @@ def test_model(model, vectorizer, outfile, test = test, topk = 3, qa_map = qa_ma
             f.write('\n')
     f.close()
 
-def unit_test(model, vectorizer, test = test, topk = 3, qa_map = qa_map):
-    for idx in range(10):
+def unit_test(model, vectorizer, test = test, topk = 3, qa_map = qa_map, threshold = 5):
+    for idx in range(len(test)):
         test_q = test[idx]
-        match = model.get_nearest(vectorizer.transform([test_q]).toarray(), topk = topk)
+        flag, match = model.get_nearest(vectorizer.transform([test_q]).toarray(), threshold = threshold, topk = topk)
+        print('Test question %d \n' % idx)
+        print(test_q + '\n')
+        print(qa_map[test_q] + '\n')
+        if flag:
+            print('**********SUCCESS**********\n')
+        else:
+            print('**********FAILURE**********\n')
+        for i in range(len(match)):
+            print('Top %d \n' % (i + 1))
+            print(match[i] + '\n')
+            print(qa_map[match[i]] + '\n')
 
 def test_threshold(vectors, v):
+    cnt_test = 0
+    cnt_train = 0
+    for t in train:
+        flag, _ = cv_model.get_nearest(cv.transform([t]).toarray(), topk = 2)
+        cnt_train = cnt_train + 1 if flag else cnt_train
+    for t in test:
+        flag, _ = cv_model.get_nearest(cv.transform([t]).toarray(), topk = 2)
+
     score = vectors.dot(v.T).flatten()
     score.sort()
     return score[-3:]
 
 test_model(cv_model, cv, 'cv_test')
 test_model(tv_model, tv, 'tv_test')
+
+train_tmp = [t.split() for t in train]
+model = Word2Vec(train_tmp, window = 100, min_count = 2)
+vectors = []
+for t in train_tmp:
+    mat = [model.wv[item] if item in model.wv else np.zeros(model.wv['As'].shape) for item in t]
+    mat = np.array(mat)
+    vectors.append(np.sum(mat, axis=0))
+
+vectors = np.array(vectors)
+w2v_model = vector_model(item_map, vectors)
+f = open('w2v_model.pkl', 'wb')
+pkl.dump(w2v_model, f)
+f.close()
+
+def unit_test_w2v(model, wv, test = test, topk = 1, qa_map = qa_map, threshold = 5):
+    for idx in range(len(test)):
+        test_q = test[idx]
+        vector = [wv[item] if item in wv else np.zeros(wv['As'].shape) for item in test_q.split()]
+        vector = np.array(vector)
+        vector = np.sum(vector, axis = 0)
+        flag, match = model.get_nearest(vector, threshold = threshold, topk = topk)
+        print('Test question %d \n' % idx)
+        print(test_q + '\n')
+        print(qa_map[test_q] + '\n')
+        if flag:
+            print('**********SUCCESS**********\n')
+        else:
+            print('**********FAILURE**********\n')
+        for i in range(len(match)):
+            print('Top %d \n' % (i + 1))
+            print(match[i] + '\n')
+            print(qa_map[match[i]] + '\n')
