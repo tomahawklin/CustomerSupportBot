@@ -37,20 +37,20 @@ class vector_model(object):
     """
     def __init__(self, item_map, vectors):
         self.item_map = item_map
-        self.vectors = vectors / np.linalg.norm(vectors, axis = 1, ord = 2)[:,None]
+        self.vectors = vectors# / np.linalg.norm(vectors, axis = 1, ord = 2)[:,None]
         self.num_items = vectors.shape[0]
         self.dim = vectors.shape[1]
         self.inv_map = {v: k for k, v in self.item_map.items()}
+    
     def get_nearest(self, candidate_vector, threshold = 7, topk = 1, ex_self = True):
         if candidate_vector.shape != (1, self.dim):
             candidate_vector = candidate_vector.reshape(1, self.dim)
         score = self.vectors.dot(candidate_vector.T)
-        if max(score) < threshold:
-            return ["Sorry can't find close match. An agent will come to help you :)"]
+        flag = max(score) > threshold
         if score.shape != (self.num_items):
             score = score.reshape(self.num_items)
         top_index = score.argsort()[::-1][:topk].tolist()
-        return [self.inv_map[i] for i in top_index]
+        return flag[0], [self.inv_map[i] for i in top_index]
 
 def print_tweets(dialogue, show_id = True):
     """
@@ -175,16 +175,18 @@ def test_model(model, vectorizer, outfile, test = test, topk = 3, qa_map = qa_ma
     f = open(filename, 'w')
     for idx in range(len(test)):
         test_q = test[idx]
-        match = model.get_nearest(vectorizer.transform([test_q]).toarray(), topk = topk)
+        flag, match = model.get_nearest(vectorizer.transform([test_q]).toarray(), topk = topk)
         f.write('Test question: %d \n' % idx)
         f.write('\n')
         f.write(test_q + '\n')
         f.write('\n')
         f.write(qa_map[test_q] + '\n')
         f.write('\n')
-        if len(match) < topk:
-            f.write(match[0] + '\n')
-            continue
+        if flag:
+            f.write('**********SUCCESS**********\n')
+        else:
+            f.write('**********FAILURE**********\n')
+        f.write('\n')
         for i in range(len(match)):
             f.write('Top %d \n' % (i + 1))
             f.write('\n')
