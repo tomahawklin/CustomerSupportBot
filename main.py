@@ -7,10 +7,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import pickle as pkl
 import random
-from gensim.models import Word2Vec
+#from gensim.models import Word2Vec
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 
-
+random.seed(11)
 df = pd.read_csv('twcs.csv')
 df['created_at'] = df['created_at'].apply(lambda x:dt.datetime.strptime(x,'%a %b %d %H:%M:%S +0000 %Y'))
 
@@ -171,6 +171,25 @@ tv_model = vector_model(item_map, vectors)
 f = open('tv_model.pkl', 'wb')
 pkl.dump(tv_model, f)
 f.close()
+
+# FastText embedding
+lines = open('wiki.en.vec', 'r').readlines()
+vec_map = {}
+for i in range(1, len(lines)):
+    tmp = lines[i].split()
+    vec_map[tmp[0]] = np.array([float(item) for item in tmp[-300:]])
+
+f = open('FastTextEmbed.pkl', 'wb')
+pkl.dump(vec_map, f)
+f.close()
+
+item_map = dict()
+vectors = np.zeros((len(train), 300)) 
+for i in range(len(train)):
+    t = train[i]
+    item_map[t] = i
+    vectors[i] = np.sum(np.array([vec_map[item] for item in t.split() if item in vec_map]), axis = 0).reshape(1, -1)
+
 
 qa_map = dict()
 for d in data:
