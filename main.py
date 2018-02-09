@@ -7,12 +7,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 import pickle as pkl
 import random
+import os
 #from gensim.models import Word2Vec
 from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS
 
 random.seed(11)
-df = pd.read_csv('twcs.csv')
-df['created_at'] = df['created_at'].apply(lambda x:dt.datetime.strptime(x,'%a %b %d %H:%M:%S +0000 %Y'))
 
 class tweet(object):
     """
@@ -67,85 +66,100 @@ def print_tweets(dialogue, show_id = True):
         else:
             print('date: %s, author: %s, text: %s' % (str(t.created_at), t.author_id, t.text))
 
-
-candidate = {}
-heap = []
-
-for i in df.index.values:
-    if i % 100000 == 0:
-        print('finished %d rows' % i)
-    t = tweet(df.loc[i])
-    key = t.in_response_to_tweet_id
-    if np.isnan(key):
-        heap.append(dialogue(t))
-    else:
-        if key in candidate:
-            candidate[key].append(t)
+def build_data(csv_file_name, company = None):
+    df = pd.read_csv(csv_file_name)
+    # Datatime Format
+    df['created_at'] = df['created_at'].apply(lambda x:dt.datetime.strptime(x,'%a %b %d %H:%M:%S +0000 %Y'))
+    # Structurize raw data into tweet and dialogue structure 
+    candidate = {}
+    dialogues = []
+    
+    for i in df.index.values:
+        if i % 100000 == 0:
+            print('finished %d rows' % i)
+        t = tweet(df.loc[i])
+        key = t.in_response_to_tweet_id
+        if np.isnan(key):
+            dialogues.append(dialogue(t))
         else:
-            candidate[key] = [t]
+            if key in candidate:
+                candidate[key].append(t)
+            else:
+                candidate[key] = [t]
+    # Double check 
+    assert(len(dialogues) + sum([len(candidate[k]) for k in candidate])) == df.shape[0]
+    # Assign candidate tweets to dialogues
+    for i in range(len(dialogues)):
+        h = dialogues[i]
+        waiting = {h.tweets[0].tweet_id}
+        while len(waiting) > 0:
+            tmp_waiting = []
+            for idx in waiting:
+                try:
+                    tmp_list = candidate[float(idx)]
+                    h.tweets += tmp_list
+                    h.ids.update([t.tweet_id for t in tmp_list])
+                    tmp_waiting += [t.tweet_id for t in tmp_list]
+                    del candidate[float(idx)]
+                except:
+                    pass
+            waiting = set(tmp_waiting)
 
-# These two numbers should equal
-print(len(heap) + sum([len(candidate[k]) for k in candidate]))
-print(df.shape[0])
+    names = [t for t in set(df['author_id'].tolist()) if re.search('[a-zA-Z]', t)]
+    # Drop these cases
+    dialogues = [d for d in dialogues if len(set([t.author_id for t in d.tweets if t.author_id in names])) == 1]
+    # Assign company label to each dialogue
+    for d in dialogues:
+        d.company = [t.author_id for t in d.tweets if t.author_id in names][0]
+    if company is not None:
+        if isinstance(company, str):
+            company = [company]
+        dialogues = [d for d in dialogues if d.company in company]
+        # For now we just keep question answering pairs
+        dialogues = [d for d in dialogues if len(d.tweets) == 2]
+    return dialogues
 
-# Assign candidate tweets to dialogues
-for i in range(len(heap)):
-    h = heap[i]
-    waiting = {h.tweets[0].tweet_id}
-    while len(waiting) > 0:
-        tmp_waiting = []
-        for idx in waiting:
-            try:
-                tmp_list = candidate[float(idx)]
-                h.tweets += tmp_list
-                h.ids.update([t.tweet_id for t in tmp_list])
-                tmp_waiting += [t.tweet_id for t in tmp_list]
-                del candidate[float(idx)]
-            except:
-                pass
-        waiting = set(tmp_waiting)
-
-names = [t for t in set(df['author_id'].tolist()) if re.search('[a-zA-Z]', t)]
-# Drop these cases
-heap = [h for h in heap if len(set([t.author_id for t in h.tweets if t.author_id in names])) == 1]
-# Assign company label to each dialogue
-for h in heap:
-    h.company = [t.author_id for t in h.tweets if t.author_id in names][0]
-
-airlines = [h for h in heap if h.company in ['Delta', 'AmericanAir', 'British_Airways']]
-airlines = [d for d in airlines if len(d.tweets) == 2]
-data = []
-pool = set()
-for d in airlines:
-    if any(s in d.tweets[0].text.lower() for s in ['how', 'when', 'what', 'where', 'who', 'which', '?']):
-        if d.tweets[0].text not in pool:
-            data.append(d)
-            pool.add(d.tweets[0].text)
+def filter_and_split(dialogues):
+    data = []
+    pool = set()
+    for d in dialogues:
+        if any(s in d.tweets[0].text.lower() for s in ['how', 'when', 'what', 'where', 'who', 'which', '?']):
+            if d.tweets[0].text not in pool:
+                data.append(d)
+                pool.add(d.tweets[0].text)
+            else:
+                continue
+    train = []
+    test = []
+    for d in data:
+        if random.random() > 0.9:
+            test.append(d.tweets[0].text)
         else:
-            continue
+            train.append(d.tweets[0].text)
 
-#del airlines
-#del df
-#del heap
-#del candidate
+    f = open('data.pkl', 'wb')
+    pkl.dump(data, f)
+    f.close()
+    f = open('train.pkl', 'wb')
+    pkl.dump(train, f)
+    f.close()
+    f = open('test.pkl', 'wb')
+    pkl.dump(test, f)
+    f.close()
+    return train, test, data
 
-train = []
-test = []
-for d in data:
-    if random.random() > 0.9:
-        test.append(d.tweets[0].text)
-    else:
-        train.append(d.tweets[0].text)
+company_names = ['Delta', 'AmericanAir', 'British_Airways']
 
-f = open('data.pkl', 'wb')
-pkl.dump(data, f)
-f.close()
-f = open('train.pkl', 'wb')
-pkl.dump(train, f)
-f.close()
-f = open('test.pkl', 'wb')
-pkl.dump(test, f)
-f.close()
+if os.path.isfile('train.pkl') and os.path.isfile('test.pkl') and os.path.isfile('data.pkl'):
+    print('load data from file')
+    train = pkl.load(open('train.pkl', 'rb'))
+    test = pkl.load(open('test.pkl', 'rb'))
+    data = pkl.load(open('data.pkl', 'rb'))
+else:
+    print('build data from scratch')
+    dialogues = build_data('twcs.csv', company = company_names)
+    train, test, data = filter_and_split(dialogues)
+
 
 
 stop_words = list(ENGLISH_STOP_WORDS) + ['flight', 'hey', 'delta', 'airline', 'airlines', 'american', 'air', 'americanair', 'british_airways', 'hi', 'plane', 'https']
