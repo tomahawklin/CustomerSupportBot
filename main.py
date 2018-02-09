@@ -191,6 +191,15 @@ f = open('tv_model.pkl', 'wb')
 pkl.dump(tv_model, f)
 f.close()
 
+def str2vec(string, embed_map):
+    '''
+    Convert a string to a row vector with a embedding map
+    '''
+    items = [item for item in string.lower().split() if item in embed_map]
+    matrix = np.array([embed_map[item] for item in items])
+    # Sequeeze the matrix to a row vector using averge pooling
+    return np.sum(matrix, axis = 0).reshape(1, -1)
+
 # FastText embedding
 lines = open('wiki.en.vec', 'r').readlines()
 vec_map = {}
@@ -202,15 +211,6 @@ f = open('FastTextEmbed.pkl', 'wb')
 pkl.dump(vec_map, f)
 f.close()
 
-def str2vec(string, embed_map):
-    '''
-    Convert a string to a row vector with a embedding map
-    '''
-    items = [item for item in string.lower().split() if item in embed_map]
-    matrix = np.array([embed_map[item] for item in items])
-    # Sequeeze the matrix to a row vector using averge pooling
-    return np.sum(matrix, axis = 0).reshape(1, -1)
-
 item_map = dict()
 vectors = np.zeros((len(train), 300)) 
 for i in range(len(train)):
@@ -220,6 +220,23 @@ for i in range(len(train)):
 
 vectors = preprocessing.normalize(vectors, norm = 'l2')
 ft_model = vector_model(item_map, vectors)
+
+# word2vec model
+load_model = gensim.models.KeyedVectors.load_word2vec_format('GoogleNews-vectors-negative300.bin', binary=True)
+word_vectors = load_model.syn0
+reverse_word_map = load_model.index2word
+word_map = {reverse_word_map[i]: i for i in range(len(reverse_word_map))}
+vec_map = {k:word_vectors[word_map[k]] for k in word_map}
+item_map = dict()
+vectors = np.zeros((len(train), 300)) 
+for i in range(len(train)):
+    t = train[i]
+    item_map[t] = i
+    vectors[i] = str2vec(t, vec_map)
+
+vectors = preprocessing.normalize(vectors, norm = 'l2')
+w2v_model = vector_model(item_map, vectors)
+
 
 def test_embed_model(model, vec_map, outfile, test = test, topk = 2, qa_map = qa_map, threshold = 5):
     filename = outfile if '.txt' in outfile else outfile + '.txt'
@@ -267,7 +284,8 @@ def unit_embed_test(model, vec_map, test = test, topk = 2, qa_map = qa_map, thre
             print(match[i] + '\n')
             print(qa_map[match[i]] + '\n')
 
-# tf_model performs pooly on test[5:15] 
+# tf_model performs pooly on test[5:15]
+#unit_embed_test(w2v_model, vec_map, test = test[5:15]) 
 
 def test_model(model, vectorizer, outfile, test = test, topk = 2, qa_map = qa_map, threshold = 5):
     filename = outfile if '.txt' in outfile else outfile + '.txt'
